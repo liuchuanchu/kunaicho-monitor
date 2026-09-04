@@ -72,7 +72,7 @@ def main():
                     send_alert(alert_msg)
                     break  # 發現名額立即推播並結束
                 else:
-                    print(f"[{current_time}] (第 {i}/{total_checks} 次) 9/26 10:00 尚無名額（{slot_text}）")
+                    print(f"[{current_time}] (第 {i}/{total_checks} 次) 9/26 10:00 尚無名額（{slot_text}）", flush=True)
                 
                 # 若非最後一次檢查，則等待 60 秒
                 if i < total_checks:
