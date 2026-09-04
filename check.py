@@ -29,34 +29,40 @@ def main():
         try:
             page.goto(URL, wait_until="networkidle", timeout=30000)
             
-            # 定位 26 號當日的儲存格
-            target_td = page.locator("//td[contains(., '26')]").first
+            # 定位 26 日那列中，包含 10:00 的單元格 (通常為第二個 td，或直接匹配文字)
+            target_slot = page.locator("//tr[contains(., '26')]//td[contains(., '10:00')]").first
             
-            if target_td.count() > 0:
-                cell_text = target_td.inner_text().strip()
-                cell_html = target_td.inner_html()
+            if target_slot.count() > 0:
+                slot_text = target_slot.inner_text().strip()
+                slot_html = target_slot.inner_html()
             else:
-                cell_text = page.content()
-                cell_html = ""
+                # 備用方案：若 td 結構未包住 10:00，改取 26 號該列的第 2 個 td
+                fallback_slot = page.locator("//tr[contains(., '26')]//td[2]").first
+                slot_text = fallback_slot.inner_text().strip() if fallback_slot.count() > 0 else ""
+                slot_html = fallback_slot.inner_html() if fallback_slot.count() > 0 else ""
 
-            # 判斷是否有名額 (出現 ○、△ 或可點擊連結)
+            # 簡化字串輸出
+            clean_status = " ".join(slot_text.split())
+
+            # 針對 10:00 場次的判定邏輯：
+            # 只要該格出現「受付中」、出現「○」或「△」、或產生超連結且不含「受付不可」
             is_available = (
-                "○" in cell_text 
-                or "△" in cell_text 
-                or "<a href" in cell_html.lower()
+                "受付中" in clean_status
+                or "○" in clean_status
+                or "△" in clean_status
+                or ("<a href" in slot_html.lower() and "受付不可" not in clean_status)
             )
 
             if is_available:
                 alert_msg = (
-                    "🚨【宮內廳名額釋出通知】\n"
-                    "目標日期：2026/09/26 出現名額！\n"
-                    f"格內狀態：{cell_text.replace(chr(10), ' ')}\n"
+                    "🚨【宮內廳 9/26 10:00 名額釋出通知】\n"
+                    f"目前狀態：{clean_status}\n"
                     f"立即前往預約：{URL}"
                 )
                 print(alert_msg)
                 send_alert(alert_msg)
             else:
-                print(f"9/26 狀態檢查：尚無名額（{cell_text.replace(chr(10), ' ')[:30]}）")
+                print(f"9/26 10:00 狀態檢查：尚無名額（{clean_status}）")
                 
         except Exception as e:
             print(f"執行異常: {e}")
