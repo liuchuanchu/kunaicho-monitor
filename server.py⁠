@@ -1,0 +1,87 @@
+import os
+import time
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import requests
+from playwright.sync_api import sync_playwright
+
+URL = "https://sankan.kunaicho.go.jp/register/frame/1001?ym=202609"
+TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN")
+TG_CHAT_ID = os.environ.get("TG_CHAT_ID")
+
+def send_alert(text):
+    if not TG_BOT_TOKEN or not TG_CHAT_ID:
+        print("未設定 Telegram Token 或 Chat ID", flush=True)
+        return
+    api_url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
+    payload = {"chat_id": TG_CHAT_ID, "text": text}
+    try:
+        res = requests.post(api_url, data=payload, timeout=10)
+        print(f"Telegram API 回應碼: {res.status_code}", flush=True)
+    except Exception as e:
+        print(f"通知發送失敗: {e}", flush=True)
+
+def monitor_loop():
+    print("啟動 Render 24H 背景監控...", flush=True)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        )
+        page = context.new_page()
+
+        while True:
+            try:
+                current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+                page.goto(URL, wait_until="networkidle", timeout=30000)
+
+                target_slot = page.locator("//tr[contains(., '26')]//td[contains(., '10:00')]").first
+                if target_slot.count() == 0:
+                    target_slot = page.locator("//tr[contains(., '26')]//td[2]").first
+
+                if target_slot.count() > 0:
+                    slot_text = " ".join(target_slot.inner_text().split())
+                    slot_html = target_slot.inner_html()
+                else:
+                    slot_text = ""
+                    slot_html = ""
+
+                is_available = (
+                    bool(slot_text)
+                    and "受付不可" not in slot_text
+                    and "(0人)" not in slot_text
+                    and ("人)" in slot_text or "<a" in slot_html.lower())
+                )
+
+                if is_available:
+                    alert_msg = (
+                        "🚨【宮內廳 9/26 10:00 名額釋出通知】\n"
+                        f"目前狀態：{slot_text}\n"
+                        f"立即前往預約：{URL}"
+                    )
+                    print(f"[{current_time}] 檢測到名額！立即發送通知！", flush=True)
+                    send_alert(alert_msg)
+                else:
+                    print(f"[{current_time}] 9/26 10:00 巡檢正常，尚無名額（{slot_text}）", flush=True)
+
+            except Exception as e:
+                print(f"巡檢過程異常: {e}", flush=True)
+
+            time.sleep(60)
+
+# Render 要求的輕量 HTTP 服務（供健康檢查通過）
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+def run_server():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+    server.serve_forever()
+
+if __name__ == "__main__":
+    t = threading.Thread(target=monitor_loop, daemon=True)
+    t.start()
+    run_server()
