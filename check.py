@@ -54,7 +54,7 @@ def main():
         page = context.new_page()
         
         # 單次排程內檢查 5 次，每次間隔 60 秒（總時長約 2 分鐘）
-        total_checks = 5
+        total_checks = 15
         interval_seconds = 60
         
         for i in range(1, total_checks + 1):
