@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import requests
 from playwright.sync_api import sync_playwright
@@ -24,10 +25,21 @@ def send_alert(text):
 def check_once(page):
     page.goto(URL, wait_until="networkidle", timeout=30000)
     
-    # 定位 9/26 上午場次（10:00）單元格
-    target_slot = page.locator("//tr[contains(., '26')]//td[contains(., '10:00')]").first
+    # 鎖定日期為 26 的該列，避免將其他日期的「26人」誤認為第 26 日
+    target_row = page.locator(
+        "//tr[th[starts-with(normalize-space(), '26')] or td[1][starts-with(normalize-space(), '26')]]"
+    ).first
+    
+    # 若第一種定位未命中，改以正則精確比對首欄文字以 26 開頭的列
+    if target_row.count() == 0:
+        target_row = page.locator("tr").filter(
+            has=page.locator("th, td").first.filter(has_text=re.compile(r"^\s*26\b"))
+        ).first
+
+    # 抓取該列中包含 10:00 的時段單元格
+    target_slot = target_row.locator("xpath=.//td[contains(., '10:00')]").first
     if target_slot.count() == 0:
-        target_slot = page.locator("//tr[contains(., '26')]//td[2]").first
+        target_slot = target_row.locator("xpath=.//td[1]").first
 
     if target_slot.count() > 0:
         slot_text = " ".join(target_slot.inner_text().split())
@@ -36,7 +48,7 @@ def check_once(page):
         slot_text = ""
         slot_html = ""
 
-    # 判定名額開放條件
+    # 判定名額開放條件：包含名額/連結且排除受付不可與0人
     is_available = (
         bool(slot_text)
         and "受付不可" not in slot_text
@@ -53,7 +65,6 @@ def main():
         )
         page = context.new_page()
         
-        # 單次排程內檢查 5 次，每次間隔 60 秒（總時長約 2 分鐘）
         total_checks = 15
         interval_seconds = 60
         
@@ -70,11 +81,10 @@ def main():
                     )
                     print(f"[{current_time}] 檢測到名額！立即發送通知！")
                     send_alert(alert_msg)
-                    break  # 發現名額立即推播並結束
+                    break
                 else:
                     print(f"[{current_time}] (第 {i}/{total_checks} 次) 9/26 10:00 尚無名額（{slot_text}）", flush=True)
                 
-                # 若非最後一次檢查，則等待 60 秒
                 if i < total_checks:
                     time.sleep(interval_seconds)
                     
