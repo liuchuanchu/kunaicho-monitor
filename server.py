@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -26,6 +27,9 @@ def monitor_loop():
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     }
+    
+    # 記錄上一次是否已發過通知，避免同一個名額每分鐘重複洗版
+    last_available = False
 
     while True:
         try:
@@ -34,19 +38,24 @@ def monitor_loop():
             
             if resp.status_code == 200:
                 soup = BeautifulSoup(resp.text, "html.parser")
-                # 尋找包含 26 日的表格行
                 target_tr = None
+
+                # 遍歷所有列，嚴格鎖定「日期欄」為 26 的那一列
                 for tr in soup.find_all("tr"):
-                    if "26" in tr.get_text():
-                        target_tr = tr
-                        break
+                    first_cell = tr.find(["th", "td"])
+                    if first_cell:
+                        first_cell_text = first_cell.get_text().strip()
+                        # 精確匹配首格文字是否以 26 開頭（排除 19 日內文包含 26 人的情況）
+                        if re.match(r"^26\b", first_cell_text):
+                            target_tr = tr
+                            break
 
                 slot_text = ""
                 has_link = False
 
                 if target_tr:
                     tds = target_tr.find_all("td")
-                    # 尋找 10:00 的單元格或第二格
+                    # 尋找 10:00 的單元格或日期後的首個時段格
                     for td in tds:
                         if "10:00" in td.get_text():
                             slot_text = " ".join(td.get_text().split())
@@ -56,6 +65,7 @@ def monitor_loop():
                         slot_text = " ".join(tds[1].get_text().split())
                         has_link = bool(tds[1].find("a"))
 
+                # 判定名額開放條件
                 is_available = (
                     bool(slot_text)
                     and "受付不可" not in slot_text
@@ -64,15 +74,18 @@ def monitor_loop():
                 )
 
                 if is_available:
-                    alert_msg = (
-                        "🚨【宮內廳 9/26 10:00 名額釋出通知】\n"
-                        f"目前狀態：{slot_text}\n"
-                        f"立即前往預約：{URL}"
-                    )
-                    print(f"[{current_time}] 檢測到名額！立即發送通知！", flush=True)
-                    send_alert(alert_msg)
+                    print(f"[{current_time}] 檢測到 9/26 10:00 有名額！（{slot_text}）", flush=True)
+                    if not last_available:
+                        alert_msg = (
+                            "🚨【宮內廳 9/26 10:00 名額釋出通知】\n"
+                            f"目前狀態：{slot_text}\n"
+                            f"立即前往預約：{URL}"
+                        )
+                        send_alert(alert_msg)
+                        last_available = True
                 else:
                     print(f"[{current_time}] 9/26 10:00 巡檢正常，尚無名額（{slot_text}）", flush=True)
+                    last_available = False
             else:
                 print(f"[{current_time}] 請求失敗，狀態碼: {resp.status_code}", flush=True)
 
