@@ -20,7 +20,10 @@ jobs:
       - name: 安裝依賴套件與 Playwright 瀏覽器
         run: |
           pip install requests playwright
-          playwright install --with-deps chromium
+          sudo rm -rf /var/lib/apt/lists/*
+          sudo apt-get update --fix-missing || true
+          playwright install chromium
+          playwright install-deps chromium || true
 
       - name: 執行監控腳本
         env:
